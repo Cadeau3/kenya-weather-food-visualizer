@@ -1,0 +1,922 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Kenya Weather & Food Price Visualizer — Full</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root{
+      --bg:#071017;
+      --panel:rgba(255,255,255,0.04);
+      --muted:#9aa4b2;
+      --accent:#d85757;
+    }
+
+    html,body{
+      height:100%;
+      margin:0;
+      background:linear-gradient(180deg,#071017,#0f1720);
+      font-family:Inter,system-ui,Arial;
+      color:#fff;
+    }
+
+    .app{
+      max-width:1200px;
+      margin:20px auto;
+      padding:20px;
+    }
+
+    header{
+      display:flex;
+      gap:16px;
+      align-items:center;
+    }
+
+    h1{
+      margin:0;
+      font-size:20px;
+    }
+
+    .panel{
+      background:var(--panel);
+      padding:14px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,0.04);
+      box-shadow:0 8px 30px rgba(0,0,0,0.6);
+    }
+
+    .controls{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
+      margin-top:12px;
+    }
+
+    select,input,button{
+      background:transparent;
+      border:1px solid rgba(255,255,255,0.06);
+      color:#fff;
+      padding:8px;
+      border-radius:8px;
+      min-height:36px;
+    }
+
+    button.btn{
+      background:var(--accent);
+      border:0;
+      padding:8px 10px;
+      border-radius:8px;
+      color:#fff;
+      cursor:pointer;
+    }
+
+    .row{
+      display:flex;
+      gap:12px;
+      margin-top:12px;
+    }
+
+    #charts{
+      display:grid;
+      grid-template-columns:1fr 420px;
+      gap:12px;
+      margin-top:12px;
+    }
+
+    canvas{
+      background:transparent;
+      border-radius:8px;
+    }
+
+    pre{
+      background:rgba(0,0,0,0.15);
+      padding:8px;
+      border-radius:8px;
+      color:#ddd;
+      overflow:auto;
+      max-height:240px;
+    }
+
+    footer{
+      margin-top:12px;
+      color:var(--muted);
+      font-size:13px;
+    }
+
+    .small{
+      font-size:13px;
+      color:var(--muted);
+    }
+
+    @media (max-width:1000px){
+      #charts{ grid-template-columns:1fr; }
+    }
+  </style>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+</head><body>
+  <div class="app">
+
+    <header>
+      <div style="width:56px;height:56px;border-radius:12px;
+                  background:linear-gradient(135deg,#421313,#6b1e1e);
+                  display:flex;align-items:center;justify-content:center;
+                  font-weight:700">KV</div>
+
+      <div>
+        <h1>Kenya Weather & Food Price Visualizer</h1>
+        <div class="small">
+          Use real CSVs or synthetic demo data. Analyze rainfall, temperature,
+          and staple food prices (maize, beans).
+        </div>
+      </div>
+    </header>
+
+
+    <!-- =======================
+         DATA CONTROL PANEL
+         ======================= -->
+    <div style="margin-top:14px;display:flex;gap:12px;align-items:flex-start">
+
+      <div class="panel" style="flex:1">
+
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <strong>Data control</strong>
+            <div class="small">
+              Upload CSV (market,month,rainfall,temp,maize,beans) OR use synthetic data
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="csvInput" type="file" accept=".csv"/>
+            <button class="btn" id="resetBtn">Reset / Randomize</button>
+          </div>
+        </div>
+
+
+        <!-- =======================
+             FILTER CONTROLS
+             ======================= -->
+        <div class="controls">
+
+          <label class="small" style="min-width:80px">Market</label>
+          <select id="marketSelect"></select>
+
+          <label class="small">Metric</label>
+          <select id="metricSelect">
+            <option value="maize">Maize (KES/90kg)</option>
+            <option value="beans">Beans (KES/90kg)</option>
+          </select>
+
+          <label class="small">From</label>
+          <input type="month" id="fromMonth">
+
+          <label class="small">To</label>
+          <input type="month" id="toMonth">
+
+          <button class="btn" id="applyRange">Apply</button>
+
+        </div>
+
+
+        <!-- =======================
+             CORRELATION + SLOPE
+             ======================= -->
+        <div class="row" style="margin-top:12px;align-items:center">
+
+          <div style="flex:1">
+            <div class="small">Pearson correlation (rainfall vs selected price)</div>
+            <div id="corrValue" style="font-weight:700;font-size:20px">—</div>
+          </div>
+
+          <div style="width:260px">
+            <div class="small">Linear slope (KES per mm)</div>
+            <div id="slopeValue" style="font-weight:700;font-size:18px">—</div>
+          </div>
+
+        </div>
+
+
+        <!-- =======================
+             EXPORT OPTIONS
+             ======================= -->
+        <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn" id="exportPNG">Export PNG</button>
+          <button class="btn" id="exportCSV">Export Filtered CSV</button>
+        </div>
+
+      </div>
+
+
+      <!-- =======================
+           SIDE PANEL — NOTES
+           ======================= -->
+      <div style="width:320px">
+        <div class="panel">
+          <strong>Project notes (for Bowdoin)</strong>
+
+          <div class="small" style="margin-top:8px">
+            Replace synthetic data with real KNBS/market monitor CSVs.
+
+            In your application, mention:
+            <ul style="margin:8px 0 0 16px">
+              <li>Data cleaning steps</li>
+              <li>Correlation and regression results</li>
+              <li>Community impact (food security, policy insights)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+    </div> <!-- end data control row -->
+
+
+    <!-- =======================
+         MAIN CHARTS SECTION
+         ======================= -->
+    <div id="charts">
+
+      <div class="panel" style="padding:12px">
+        <canvas id="timeChart" height="420"></canvas>
+      </div>
+
+      <div class="panel" style="padding:12px">
+        <canvas id="scatterChart" height="420"></canvas>
+        <div style="margin-top:8px" class="small">
+          Scatter: rainfall vs price. Regression line and points shown.
+        </div>
+      </div>
+
+    </div> <!-- end charts -->
+
+
+    <!-- =======================
+         DATA PREVIEW + WRITEUP
+         ======================= -->
+    <div style="margin-top:12px;display:flex;gap:12px">
+
+      <div class="panel" style="flex:1">
+        <strong>Dataset preview</strong>
+        <pre id="dataPreview"></pre>
+      </div>
+
+      <div class="panel" style="width:320px">
+
+        <strong>Suggested writeup (150–250 words)</strong>
+
+        <div class="small" style="margin-top:8px" id="writeup">
+          <p><strong>Kenya Weather & Food Price Visualizer</strong> is an analysis
+          that explores the relationship between monthly rainfall and staple food
+          prices across Kenyan markets. Using time-series visualization,
+          correlation coefficients, and linear regression, the project shows how
+          rainfall variability may influence maize and beans prices. Methodology
+          included data cleaning, seasonal decomposition, correlation testing
+          (Pearson), and a simple linear model. This work aims to support local
+          stakeholders by identifying months and markets where price shocks are
+          most likely after rain deficits. Replace synthetic data with real
+          market monitors and include policy recommendations.</p><script>
+/* ===========================
+   HELPERS + CSV PARSER
+   ============================ */
+
+function round2(x){
+  return Math.round(x * 100) / 100;
+}
+
+function parseCSV(text){
+  // simple CSV parser — assumes comma-separated + header row
+  const lines = text.trim().split(/\r?\n/).filter(Boolean);
+  if(lines.length < 2) return [];
+
+  const headers = lines[0].split(',').map(h=>h.trim());
+  const rows = [];
+
+  for(let i=1; i<lines.length; i++){
+    const cols = lines[i].split(',').map(c=>c.trim());
+    const obj = {};
+    for(let j=0; j<headers.length; j++){
+      obj[headers[j]] = cols[j] || '';
+    }
+    rows.push(obj);
+  }
+
+  return rows;
+}
+
+function downloadDataUrl(dataUrl, fileName){
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+
+/* =========================================
+   SYNTHETIC DATASET GENERATOR (24 months)
+   ========================================= */
+
+const DEFAULT_MARKETS = [
+  'Nairobi (Gikomba)',
+  'Kisumu',
+  'Eldoret',
+  'Mombasa (Miritini)',
+  'Nakuru'
+];
+
+// Generate list of months: 2023-01 → 2024-12
+const MONTHS = (() => {
+  const arr = [];
+  let start = new Date(2023, 0, 1);
+  for(let i=0; i<24; i++){
+    const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
+    arr.push(d.toISOString().slice(0,7));
+  }
+  return arr;
+})();
+
+
+function generateSyntheticSeries(){
+  const data = {};
+
+  for(const m of DEFAULT_MARKETS){
+    let baseRain = 80 + Math.random()*120;
+    let baseTemp = 20 + Math.random()*6;
+    let basePrice = 7000 + Math.random()*4000;
+
+    const rows = [];
+
+    for(let i=0; i<MONTHS.length; i++){
+      const seasonal = 40 * Math.sin((i/12) * Math.PI * 2) + 60;
+
+      const rain = Math.max(
+        0,
+        baseRain + seasonal * 0.6 + (Math.random()*80 - 40)
+      );
+
+      const temp = baseTemp
+        + 3 * Math.cos((i/12) * Math.PI * 2)
+        + (Math.random()-0.5)*1.6;
+
+      const lagRain = Math.max(1, rain + (Math.random()-0.5)*30);
+
+      const price = Math.max(
+        3500,
+        basePrice + (3000 * (1 - (lagRain / 220)))
+        + (Math.random()-0.5)*500
+      );
+
+      rows.push({
+        month: MONTHS[i],
+        rainfall: round2(rain),
+        temp: round2(temp),
+        maize: round2(price),
+        beans: round2(price * 0.95 + (Math.random()-0.5)*200)
+      });
+    }
+
+    data[m] = rows;
+  }
+
+  return data;
+}
+
+
+/* =========================================
+   APP STATE + UI REFERENCES
+   ========================================= */
+
+let DATASETS = generateSyntheticSeries();   // current dataset (imported or synthetic)
+let markets = Object.keys(DATASETS);
+
+const marketSelect = document.getElementById('marketSelect');
+const metricSelect = document.getElementById('metricSelect');
+const fromMonth = document.getElementById('fromMonth');
+const toMonth = document.getElementById('toMonth');
+const applyRange = document.getElementById('applyRange');
+const corrValue = document.getElementById('corrValue');
+const slopeValue = document.getElementById('slopeValue');
+const dataPreview = document.getElementById('dataPreview');
+const csvInput = document.getElementById('csvInput');
+const resetBtn = document.getElementById('resetBtn');
+const exportPNG = document.getElementById('exportPNG');
+const exportCSV = document.getElementById('exportCSV');
+
+function populateMarkets(){
+  marketSelect.innerHTML = '';
+  markets = Object.keys(DATASETS);
+
+  for(const m of markets){
+    const opt = document.createElement('option');
+    opt.value = m;
+    opt.innerText = m;
+    marketSelect.appendChild(opt);
+  }
+
+  marketSelect.value = markets[0] || '';
+}/* =========================================
+   CHARTS — Time Series & Scatter
+   ========================================= */
+
+let timeChart, scatterChart;
+
+function createCharts(){
+
+  /* ---------- Time Series Chart ---------- */
+  if(timeChart) timeChart.destroy();
+
+  const tctx = document.getElementById('timeChart').getContext('2d');
+
+  timeChart = new Chart(tctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: []
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode:'index', intersect:false },
+      plugins: {
+        legend: { position:'top' }
+      },
+      scales: {
+        y: {
+          position: 'left',
+          title: { display: true, text: 'Rainfall / Price' }
+        },
+        y2: {
+          position: 'right',
+          title: { display: true, text: 'Temperature (°C)' },
+          grid: { display:false }
+        }
+      }
+    }
+  });
+
+
+  /* ---------- Scatter Chart ---------- */
+  if(scatterChart) scatterChart.destroy();
+
+  const sctx = document.getElementById('scatterChart').getContext('2d');
+
+  scatterChart = new Chart(sctx, {
+    type: 'scatter',
+    data: { datasets: [] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display:false } }
+    }
+  });
+}
+
+createCharts();
+
+
+/* =========================================
+   STATISTICS — Pearson Correlation
+   ========================================= */
+
+function pearson(x, y){
+  if(x.length !== y.length || x.length < 2) return NaN;
+
+  const n = x.length;
+  const meanX = x.reduce((a,b)=>a+b,0) / n;
+  const meanY = y.reduce((a,b)=>a+b,0) / n;
+
+  let num = 0, denX = 0, denY = 0;
+
+  for(let i=0; i<n; i++){
+    const dx = x[i] - meanX;
+    const dy = y[i] - meanY;
+    num += dx * dy;
+    denX += dx * dx;
+    denY += dy * dy;
+  }
+
+  return num / Math.sqrt(denX * denY);
+}
+
+
+/* =========================================
+   STATISTICS — Linear Regression
+   y = slope * x + intercept
+   ========================================= */
+
+function linearRegression(x, y){
+  if(x.length !== y.length || x.length < 2) return null;
+
+  const n = x.length;
+  const meanX = x.reduce((a,b)=>a+b,0) / n;
+  const meanY = y.reduce((a,b)=>a+b,0) / n;
+
+  let num = 0, den = 0;
+
+  for(let i=0; i<n; i++){
+    num += (x[i] - meanX) * (y[i] - meanY);
+    den += (x[i] - meanX) ** 2;
+  }
+
+  const slope = num / den;
+  const intercept = meanY - slope * meanX;
+
+  return {
+    slope,
+    intercept,
+    predict: xx => slope * xx + intercept
+  };
+}/* =========================================
+   FILTERING + VIEW UPDATE ENGINE
+   ========================================= */
+
+function getFilteredRows(market, from, to){
+  if(!DATASETS[market]) return [];
+  return DATASETS[market].filter(r => r.month >= from && r.month <= to);
+}
+
+
+function updateView(){
+
+  const market = marketSelect.value;
+  const metric = metricSelect.value;
+
+  const from = fromMonth.value || MONTHS[0];
+  const to   = toMonth.value   || MONTHS[MONTHS.length - 1];
+
+  const rows = getFilteredRows(market, from, to);
+
+  /* ----- No rows? Clear everything. ----- */
+  if(rows.length === 0){
+    dataPreview.innerText = 'No data for this market/range.';
+    corrValue.innerText = '—';
+    slopeValue.innerText = '—';
+
+    timeChart.data.labels = [];
+    timeChart.data.datasets = [];
+    timeChart.update();
+
+    scatterChart.data.datasets = [];
+    scatterChart.update();
+
+    return;
+  }
+
+
+  /* =========================================
+     TIME SERIES CHART UPDATE
+     ========================================= */
+
+  const labels = rows.map(r => r.month);
+  const rainfall = rows.map(r => r.rainfall);
+  const temp = rows.map(r => r.temp);
+  const price = rows.map(r => r[metric]);
+
+  timeChart.data.labels = labels;
+
+  timeChart.data.datasets = [
+
+    // Rainfall as bars
+    {
+      type: 'bar',
+      label: 'Rainfall (mm)',
+      data: rainfall,
+      backgroundColor: 'rgba(77,201,255,0.34)',
+      yAxisID: 'y'
+    },
+
+    // Price as line
+    {
+      type: 'line',
+      label: metric === 'maize'
+        ? 'Maize price (KES/90kg)'
+        : 'Beans (KES/90kg)',
+      data: price,
+      borderColor: 'rgba(216,87,87,0.95)',
+      tension: 0.25,
+      yAxisID: 'y'
+    },
+
+    // Temperature as secondary line
+    {
+      type: 'line',
+      label: 'Temp (C)',
+      data: temp,
+      borderColor: 'rgba(255,200,60,0.95)',
+      tension: 0.3,
+      yAxisID: 'y2'
+    }
+
+  ];
+
+  timeChart.update();
+
+
+  /* =========================================
+     SCATTER CHART UPDATE
+     ========================================= */
+
+  const scatterData = rows.map(r => ({
+    x: r.rainfall,
+    y: r[metric]
+  }));
+
+  const reg = linearRegression(
+    rows.map(r => r.rainfall),
+    rows.map(r => r[metric])
+  );
+
+  const datasets = [
+    {
+      label: 'Monthly points',
+      data: scatterData,
+      pointRadius: 4,
+      backgroundColor: 'rgba(216,87,87,0.95)'
+    }
+  ];
+
+  /* ----- Regression line ----- */
+  if(reg){
+    const xMin = Math.min(...rainfall);
+    const xMax = Math.max(...rainfall);
+
+    datasets.push({
+      type: 'line',
+      label: 'Fit',
+      data: [
+        {x: xMin, y: reg.predict(xMin)},
+        {x: xMax, y: reg.predict(xMax)}
+      ],
+      borderColor: 'rgba(220,220,220,0.95)',
+      tension: 0,
+      pointRadius: 0
+    });
+
+    slopeValue.innerText = reg.slope.toFixed(3) + ' (KES per mm)';
+  }
+  else {
+    slopeValue.innerText = '—';
+  }
+
+  scatterChart.data.datasets = datasets;
+  scatterChart.update();
+
+
+  /* =========================================
+     PEARSON CORRELATION
+     ========================================= */
+  const corr = pearson(rainfall, price);
+  corrValue.innerText = isNaN(corr) ? '—' : corr.toFixed(3);
+
+
+  /* =========================================
+     DATA PREVIEW (JSON format)
+     ========================================= */
+  dataPreview.innerText = JSON.stringify(rows.slice(0, 24), null, 2);
+}/* =========================================
+   CSV IMPORT LOGIC
+   ========================================= */
+
+csvInput.addEventListener('change', (e)=>{
+  const f = e.target.files[0];
+  if(!f) return;
+
+  const reader = new FileReader();
+
+  reader.onload = (ev)=>{
+    try{
+      const text = ev.target.result;
+      const rows = parseCSV(text);
+
+      if(rows.length === 0)
+        throw new Error('CSV appears empty or invalid.');
+
+      const required = ['market','month','rainfall','temp','maize','beans'];
+      const keys = Object.keys(rows[0]).map(k=>k.toLowerCase());
+
+      for(const req of required){
+        if(!keys.includes(req)){
+          throw new Error('CSV missing column: ' + req);
+        }
+      }
+
+      /* ============ Transform incoming CSV into DATASETS ============ */
+      const newData = {};
+
+      for(const r of rows){
+
+        const mkt = r['market'] || r['Market'] || r['MARKET'];
+        const month = r['month'] || r['Month'] || r['MONTH'];
+
+        const rainfall = parseFloat(r['rainfall'] || r['Rainfall'] || r['RAINFALL']);
+        const temp     = parseFloat(r['temp']     || r['Temp']     || r['TEMP']);
+        const maize    = parseFloat(r['maize']    || r['Maize']    || r['MAIZE']);
+        const beans    = parseFloat(r['beans']    || r['Beans']    || r['BEANS']);
+
+        if(!newData[mkt]) newData[mkt] = [];
+
+        newData[mkt].push({
+          month,
+          rainfall: round2(rainfall),
+          temp: round2(temp),
+          maize: round2(maize),
+          beans: round2(beans)
+        });
+      }
+
+      /* Sort months for each market */
+      for(const m of Object.keys(newData)){
+        newData[m].sort((a,b)=> a.month.localeCompare(b.month));
+      }
+
+      DATASETS = newData;
+      populateMarkets();
+
+      const allMonths = new Set();
+      Object.values(DATASETS).flat().forEach(r => allMonths.add(r.month));
+      const monthsArr = Array.from(allMonths).sort();
+
+      fromMonth.value = monthsArr[0] || '';
+      toMonth.value = monthsArr[monthsArr.length - 1] || '';
+
+      updateView();
+
+    } catch(err){
+      alert('CSV import failed: ' + err.message);
+    }
+  };
+
+  reader.readAsText(f);
+});
+
+
+/* =========================================
+   RESET / RANDOMIZE SYNTHETIC DATA
+   ========================================= */
+
+resetBtn.addEventListener('click', ()=>{
+  DATASETS = generateSyntheticSeries();
+  populateMarkets();
+
+  fromMonth.value = MONTHS[0];
+  toMonth.value = MONTHS[MONTHS.length - 1];
+
+  updateView();
+});
+
+
+/* =========================================
+   EXPORT FILTERED CSV
+   ========================================= */
+
+exportCSV.addEventListener('click', ()=>{
+  const market = marketSelect.value;
+  const from = fromMonth.value || MONTHS[0];
+  const to   = toMonth.value || MONTHS[MONTHS.length - 1];
+
+  const rows = getFilteredRows(market, from, to);
+
+  if(rows.length === 0){
+    alert('No rows to export.');
+    return;
+  }
+
+  let csv = 'market,month,rainfall,temp,maize,beans\n';
+
+  for(const r of rows){
+    csv += `${market},${r.month},${r.rainfall},${r.temp},${r.maize},${r.beans}\n`;
+  }
+
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+
+  downloadDataUrl(url, `${market.replace(/\s+/g,'_')}_${from}_to_${to}.csv`);
+
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+});
+
+
+/* =========================================
+   EXPORT PNG SNAPSHOT (combined charts)
+   ========================================= */
+
+async function chartToImage(chart){
+  return new Promise((resolve, reject)=>{
+    try{
+      const url = chart.toBase64Image();
+      const img = new Image();
+      img.onload = ()=> resolve(img);
+      img.onerror = reject;
+      img.src = url;
+    } catch(e){
+      reject(e);
+    }
+  });
+}
+
+exportPNG.addEventListener('click', async ()=>{
+  try{
+    const title = document.querySelector('h1').innerText;
+    const market = marketSelect.value;
+
+    const from = fromMonth.value || MONTHS[0];
+    const to   = toMonth.value || MONTHS[MONTHS.length - 1];
+
+    const img1 = await chartToImage(timeChart);
+    const img2 = await chartToImage(scatterChart);
+
+    const w = 1400, h = 900;
+    const tmp = document.createElement('canvas');
+    tmp.width = w; tmp.height = h;
+
+    const ctx = tmp.getContext('2d');
+
+    /* Background */
+    ctx.fillStyle = '#071017';
+    ctx.fillRect(0,0,w,h);
+
+    /* Draw charts */
+    ctx.drawImage(img1, 40, 80, 900, 500);
+    ctx.drawImage(img2, 980, 80, 360, 360);
+
+    /* Title & metadata */
+    ctx.fillStyle = '#fff';
+    ctx.font = '700 20px Inter, Arial';
+    ctx.fillText(title + ' — ' + market, 40, 44);
+
+    ctx.font = '400 13px Inter, Arial';
+    ctx.fillStyle = '#cfcfcf';
+    ctx.fillText('Range: ' + from + ' → ' + to + ' | Metric: ' + metricSelect.value, 40, 70);
+
+    /* Correlation & slope */
+    ctx.fillStyle = '#fff';
+    ctx.font = '600 14px Inter, Arial';
+    ctx.fillText('Pearson r: ' + corrValue.innerText, 980, 470);
+    ctx.fillText('Slope: ' + slopeValue.innerText, 980, 495);
+
+    /* Caption (from writeup) */
+    const caption = document.getElementById('writeup').innerText;
+    wrapText(ctx, caption, 40, 600, 1320, 18, '#cfcfcf');
+
+    /* Download PNG */
+    const data = tmp.toDataURL('image/png');
+    downloadDataUrl(data, `visualizer_${market.replace(/\s+/g,'_')}_${from}_to_${to}.png`);
+
+  } catch(err){
+    alert('Export PNG failed: ' + err.message);
+  }
+});
+
+
+/* =========================================
+   TEXT WRAPPER FOR PNG
+   ========================================= */
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight, style='#fff'){
+  ctx.fillStyle = style;
+  const words = text.split(' ');
+  let line = '';
+
+  for(let n=0; n<words.length; n++){
+    const testLine = line + words[n] + ' ';
+    const metrics = ctx.measureText(testLine);
+
+    if(metrics.width > maxWidth && n > 0){
+      ctx.fillText(line, x, y);
+      line = words[n] + ' ';
+      y += lineHeight;
+    } else {
+      line = testLine;
+    }
+  }
+
+  ctx.fillText(line, x, y);
+}/* =========================================
+   EVENT LISTENERS + INITIALIZATION
+   ========================================= */
+
+marketSelect.addEventListener('change', updateView);
+metricSelect.addEventListener('change', updateView);
+applyRange.addEventListener('click', updateView);
+
+
+/* Populate markets from synthetic dataset on load */
+populateMarkets();
+
+/* Default date range */
+fromMonth.value = MONTHS[0];
+toMonth.value = MONTHS[MONTHS.length - 1];
+
+/* Initial chart render */
+updateView();
+
+</script>
+
+</body>
+</html>
